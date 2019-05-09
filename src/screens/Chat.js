@@ -1,7 +1,11 @@
 import React, { Component } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { GiftedChat, Message } from "react-native-gifted-chat";
-import SendBird from "sendbird";
+import { ChatManager, TokenProvider } from "@pusher/chatkit-client";
+
+const CHATKIT_INSTANCE_LOCATOR_ID = "YOUR CHATKIT INSTANCE LOCATOR ID";
+const CHATKIT_SECRET_KEY = "YOUR CHATKIT SECRET";
+const CHATKIT_TOKEN_PROVIDER_ENDPOINT = "YOUR CHATKIT TEST TOKEN PROVIDER URL";
 
 class Chat extends Component {
 
@@ -11,9 +15,8 @@ class Chat extends Component {
   };
 
 
-static navigationOptions = ({ navigation }) => {
-
-  const { params } = navigation.state;
+  static navigationOptions = ({ navigation }) => {
+    const { params } = navigation.state;
     return {
       headerTitle: params.room_name
     };
@@ -24,85 +27,77 @@ static navigationOptions = ({ navigation }) => {
   constructor(props) {
     super(props);
     const { navigation } = this.props;
-    this.user_id = navigation.getParam("id");
-    this.room_url = navigation.getParam("room_url");
+
+    this.user_id = navigation.getParam("user_id");
+    this.room_id = navigation.getParam("room_id");
   }
 
 
-  componentWillUnmount() {
-    const sb = SendBird.getInstance();
-    sb.disconnect();
+  componentWillUnMount() {
+    this.currentUser.disconnect();
   }
 
 
-  componentDidMount() {
-    const sb = SendBird.getInstance();
-    const channelHandler = new sb.ChannelHandler();
+  async componentDidMount() {
+    try {
+      const chatManager = new ChatManager({
+        instanceLocator: CHATKIT_INSTANCE_LOCATOR_ID,
+        userId: this.user_id,
+        tokenProvider: new TokenProvider({ url: CHATKIT_TOKEN_PROVIDER_ENDPOINT })
+      });
 
-    channelHandler.onMessageReceived = (channel, message) => {
-      if (channel.url === this.room_url) {
-        this.addMessage(message);
-      }
+      let currentUser = await chatManager.connect();
+      this.currentUser = currentUser;
+
+      await this.currentUser.subscribeToRoomMultipart({
+        roomId: this.room_id,
+        hooks: {
+          onMessage: this.onReceive
+        },
+        messageLimit: 2
+      });
+
+      await this.setState({
+        room_users: this.currentUser.users
+      });
+
+    } catch (chat_mgr_err) {
+      console.log("error with chat manager: ", chat_mgr_err);
     }
-
-    sb.addChannelHandler(this.room_url, channelHandler);
-    sb.OpenChannel.getChannel(this.room_url, (channel, error) => {
-      if (!error) {
-        this.channel = channel;
-        this.channel.enter((response, error) => {
-          if (!error) {
-            const messageListQuery = this.channel.createPreviousMessageListQuery();
-            messageListQuery.limit = 10;
-            messageListQuery.load((messageList, error) => {
-              if (!error) {
-                if (messageList.length >= 10) {
-                  this.setState({
-                    show_load_earlier: true
-                  });
-                }
-
-                messageList.forEach((message_data) => {
-                  this.addMessage(message_data);
-                });
-              }
-            });
-          }
-        });
-      }
-    });
   }
 
 
-  getMessage = (data) => {
-    if (!data.sender) {
-      data.sender = {
-        userId: '123',
-        nickname: 'YOUR NICKNAME',
-        profileUrl: 'https://dxstmhyqfqr1o.cloudfront.net/sample/cover/cover_06.jpg'
-      }
-    }
-
-    const msg_data = {
-      _id: data.messageId,
-      text: data.message,
-      timestamp: data.createdAt,
-      createdAt: new Date(data.createdAt),
-      user: {
-        _id: data.sender.userId,
-        name: data.sender.nickname,
-        avatar: data.sender.profileUrl
-      }
-    };
-
-    return msg_data;
-  }
-
-
-  addMessage = (data) => {
-    const message = this.getMessage(data);
+  onReceive = (data) => {
+    const { message } = this.getMessage(data);
     this.setState((previousState) => ({
       messages: GiftedChat.append(previousState.messages, message)
     }));
+
+    if (this.state.messages.length > 1) {
+      this.setState({
+        show_load_earlier: true
+      });
+    }
+  }
+
+
+  getMessage = ({ id, sender, parts, createdAt }) => {
+    const text = parts.find(part => part.partType === 'inline').payload.content;
+
+    const msg_data = {
+      _id: id,
+      text: text,
+      createdAt: new Date(createdAt),
+      user: {
+        _id: sender.id,
+        name: sender.name,
+        avatar: sender.avatarURL
+      }
+    };
+
+    return {
+      message: msg_data
+    };
   }
 
 
@@ -128,49 +123,63 @@ static navigationOptions = ({ navigation }) => {
   }
   //
 
-  loadEarlierMessages = () => {
+  loadEarlierMessages = async () => {
     this.setState({
       is_loading: true
     });
 
-    const earliest_message_timestamp = Math.min(
-      ...this.state.messages.map(m => parseInt(m.timestamp))
+    const earliest_message_id = Math.min(
+      ...this.state.messages.map(m => parseInt(m._id))
     );
 
-    this.channel.getPreviousMessagesByTimestamp(earliest_message_timestamp, false, 10, true, 0, '', (messages, error) => {
-      if (!error) {
+    try {
+      let messages = await this.currentUser.fetchMultipartMessages({
+        roomId: this.room_id,
+        initialId: earliest_message_id,
+        direction: "older",
+        limit: 10
+      });
+
+      if (!messages.length) {
         this.setState({
-          is_loading: false
+          show_load_earlier: false
         });
-
-        if (messages.length) {
-          let earlier_messages = [];
-          messages.forEach((message_data) => {
-            const message = this.getMessage(message_data);
-            earlier_messages.push(message);
-          });
-
-          this.setState(previousState => ({
-            messages: previousState.messages.concat(earlier_messages)
-          }));
-        } else {
-          this.setState({
-            show_load_earlier: false
-          });
-        }
       }
-    });
 
+      let earlier_messages = [];
+      messages.forEach((msg) => {
+        let { message } = this.getMessage(msg);
+        earlier_messages.push(message);
+      });
+
+      await this.setState(previousState => ({
+        messages: previousState.messages.concat(earlier_messages.reverse())
+      }));
+    } catch (err) {
+      console.log("error occured while trying to load older messages", err);
+    }
+
+    await this.setState({
+      is_loading: false
+    });
   }
 
   //
 
-  onSend = ([message]) => {
-    this.channel.sendUserMessage(message.text, (message, error) => {
-      if (!error) {
-        this.addMessage(message);
-      }
-    });
+  onSend = async ([message]) => {
+    const message_parts = [
+      { type: "text/plain", content: message.text }
+    ];
+
+    try {
+      await this.currentUser.sendMultipartMessage({
+        roomId: this.room_id,
+        parts: message_parts
+      });
+
+    } catch (send_msg_err) {
+      console.log("error sending message: ", send_msg_err);
+    }
   }
 
 }

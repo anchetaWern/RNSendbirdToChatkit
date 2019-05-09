@@ -1,7 +1,8 @@
 import React, { Component } from "react";
-import { View, Text, FlatList, Button } from "react-native";
-import SendBird from "sendbird";
-import stringHash from "string-hash";
+import { View, Text, FlatList, Button, Alert } from "react-native";
+import axios from "axios";
+
+const CHAT_SERVER = "YOUR NGROK HTTPS URL";
 
 class Rooms extends Component {
   static navigationOptions = {
@@ -22,25 +23,15 @@ class Rooms extends Component {
 
 
   async componentDidMount() {
-    const sb = SendBird.getInstance();
-    const channelListQuery = sb.OpenChannel.createOpenChannelListQuery();
+    try {
+      const response = await axios.post(`${CHAT_SERVER}/rooms`, { user_id: this.user_id });
+      const { rooms } = response.data;
 
-    if (channelListQuery.hasNext) {
-      channelListQuery.next((channelList, error) => {
-        if (!error) {
-          const rooms = channelList.map((item) => {
-            return {
-              id: stringHash(item.url),
-              name: item.name,
-              url: item.url
-            }
-          });
-
-          this.setState({
-            rooms
-          });
-        }
+      this.setState({
+        rooms
       });
+    } catch (get_rooms_err) {
+      console.log("error getting rooms: ", get_rooms_err);
     }
   }
 
@@ -66,21 +57,27 @@ class Rooms extends Component {
     return (
       <View style={styles.list_item}>
         <Text style={styles.list_item_text}>{item.name}</Text>
-
-        <Button title="Enter" color="#0064e1" onPress={() => {
-          this.enterChat(item);
-        }} />
-
+        {
+          item.joined &&
+          <Button title="Enter" color="#0064e1" onPress={() => {
+            this.enterChat(item);
+          }} />
+        }
+        {
+          !item.joined &&
+          <Button title="Join" color="#484848" onPress={() => {
+            this.joinRoom(item);
+          }} />
+        }
       </View>
     );
   }
-  //
 
 
   goToChatScreen = (room) => {
     this.props.navigation.navigate("Chat", {
-      id: this.user_id,
-      room_url: room.url,
+      user_id: this.user_id,
+      room_id: room.id,
       room_name: room.name
     });
   }
@@ -89,6 +86,17 @@ class Rooms extends Component {
 
   enterChat = async (room) => {
     this.goToChatScreen(room);
+  }
+
+
+  joinRoom = async (room) => {
+    try {
+      await axios.post(`${CHAT_SERVER}/user/join`, { room_id: room.id, user_id: this.user_id });
+      Alert.alert("Joined Room", `You are now a member of [${room.name}]`);
+      this.goToChatScreen(room);
+    } catch (join_room_err) {
+      console.log("error joining room: ", join_room_err);
+    }
   }
 
 }

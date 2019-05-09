@@ -1,6 +1,5 @@
 import React, { Component } from "react";
 import { View, Text, TextInput, Button } from "react-native";
-import SendBird from "sendbird";
 
 class Login extends Component {
   static navigationOptions = {
@@ -13,6 +12,7 @@ class Login extends Component {
     is_loading: false
   };
 
+  //
 
   render() {
     return (
@@ -43,17 +43,21 @@ class Login extends Component {
   }
 
 
-  login = () => {
+  login = async () => {
     const username = this.state.username;
     this.setState({
       is_loading: true
     });
 
-    const sb = new SendBird({ 'appId': 'YOUR SENDBIRD APP ID' });
-    sb.connect(username, (user, error) => {
+    if (username) {
       this.props.navigation.navigate("Rooms", {
-        id: username
+        'id': username
       });
+    }
+
+    await this.setState({
+      is_loading: false,
+      username: ""
     });
   }
 }
