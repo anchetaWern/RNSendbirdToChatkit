@@ -5,7 +5,6 @@ The app has the following features:
 
 - Sending a message.
 - Loading older messages.
-- Typing indicators.
 - Joining public rooms.
 
 This repo has the following branches
