@@ -1,5 +1,7 @@
 # RNSendbirdToChatkit
-A sample React Native chat app showing how to migrate from Sendbird to Chatkit
+A sample React Native chat app showing how to migrate from Sendbird to Chatkit.
+
+The tutorial is available at: [https://pusher.com/tutorials/migrating-sendbird-chatkit](https://pusher.com/tutorials/migrating-sendbird-chatkit)
 
 The app has the following features:
 
